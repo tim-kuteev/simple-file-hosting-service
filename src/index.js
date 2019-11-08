@@ -1,56 +1,79 @@
 const argv = require('minimist')(process.argv.slice(2));
-const debug = require('debug')('multipart-handler');
-const fs = require('fs');
+const debug = require('debug')('simple-file-hosting-service');
 const express = require('express');
-const cors = require('cors');
-const IncomingForm = require('formidable').IncomingForm;
+const StaticServer = require('node-static').Server;
+const fileUtils = require('./file-utils');
 
-const port = argv.port || 8080;
+const PORT = argv.port || 8080;
+
+const PAGE = `
+<form action="/upload" enctype="multipart/form-data" method="post">
+  <input type="file" name="file" style="width: 20rem;">
+  <input type="submit" value="Upload">
+</form>
+<form action="/url-upload" enctype="application/x-www-form-urlencoded" method="post">
+  <input type="text" name="url" placeholder="Paste file URL" style="width: 20rem;">
+  <input type="submit" value="Upload">
+</form>
+`;
+
+const fileServer = new StaticServer(fileUtils.PUBLIC_DIR);
 
 const app = express();
 
-app.use(cors({origin: '*'}));
+app.use(express.urlencoded({extended: false}));
+app.use(express.json());
 
-app.use(function (req, res, next) {
+app.use('/favicon.ico', (req, res, next) => res.sendStatus(204));
+
+app.use((req, res, next) => {
   debug(`Request: ${req.method} ${req.url}`);
   next();
 });
 
-app.post('/upload', (req, res) => {
-  const form = new IncomingForm();
-  form.parse(req)
-    .on('field', function (name, value) {
-      debug('Form field: %o %o', name, value);
-    })
-    .on('progress', (received, expected) => {
-      debug('File upload: progress %o', Math.round(100 * received / expected));
-    })
-    .on('file', (name, file) => {
-      debug('File uploaded: %o', file.name);
-      fs.unlink(file.path, (err) => {
-        if (err) debug('Error: %O', err);
-        debug('Unlinked %o %o', file.path, file.name);
-      });
-    })
-    .on('end', () => {
-      debug('File upload: end');
-      res.status(200).send();
-    })
-    .on('error', () => {
-      res.status(500).send();
-    });
+app.get('/download/*', (req, res) => {
+  fileServer
+    .serveFile(req.params[0], 200, {}, req, res)
+    .on('error', (err) => res.sendStatus(404));
 });
 
-app.use(function (req, res) {
-  res.status(200)
-    .send(
-      '<form action="/upload" enctype="multipart/form-data" method="post">' +
-      '<input type="file" name="upload" multiple="multiple"><br/>' +
-      '<input type="submit" value="Upload">' +
-      '</form>'
-    );
+app.post('/upload', async (req, res, next) => {
+  try {
+    await fileUtils.shakeStorage();
+    const file = await fileUtils.upload(req, res);
+    debug('File uploaded:\n\t%o\n\t%o', file.path, file.originalname);
+    const uri = await fileUtils.publish(file.path, file.originalname);
+    res.redirect(uri);
+  } catch (err) {
+    next(err);
+  }
 });
 
-app.listen(port, () => {
-  debug('Listening %o', port);
+app.post('/url-upload', async (req, res, next) => {
+  try {
+    await fileUtils.shakeStorage();
+    const file = await fileUtils.download(req.body.url);
+    debug('File uploaded by url:\n\t%o\n\t%o', file.dest, file.name);
+    const uri = await fileUtils.publish(file.dest, file.name);
+    res.redirect(uri);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.use((req, res) => {
+  res.send(PAGE);
+});
+
+app.use((err, req, res, next) => {
+  debug('Error: %O', err);
+  res.sendStatus(500);
+});
+
+app.listen(PORT, () => {
+  debug('Listening %o', PORT);
+});
+
+process.on('uncaughtException', (err) => {
+  debug('Uncaught Exception: %O', err);
 });
