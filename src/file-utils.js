@@ -28,7 +28,15 @@ async function shakeStorage() {
 }
 
 async function readSize(item) {
-  const stat = await fsp.stat(item);
+  let stat;
+  try {
+    stat = await fsp.stat(item);
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return 0;
+    }
+    throw err;
+  }
   if (stat.isDirectory()) {
     const dir = await fsp.readdir(item);
     const promises = [];
