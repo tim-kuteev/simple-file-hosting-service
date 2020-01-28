@@ -9,8 +9,9 @@ const multer = require('multer');
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const MAX_STORAGE_SIZE = 100 * 1024 * 1024;
-const PUBLIC_DIR = path.join(__dirname, 'public');
-const UPLOAD_DIR = path.join(__dirname, 'uploads');
+const BASE_DIR = path.join(__dirname, '..');
+const PUBLIC_DIR = path.join(BASE_DIR, 'public');
+const UPLOAD_DIR = path.join(BASE_DIR, 'uploads');
 
 const uploadFile = multer({
   dest: UPLOAD_DIR,
@@ -128,6 +129,7 @@ async function downloadFile(url, dest) {
 }
 
 async function publish(source, name) {
+  await shakeStorage();
   const publicPath = await makePublicDest();
   const dest = path.join(publicPath, name);
   await fsp.rename(source, dest);
@@ -143,15 +145,14 @@ async function makePublicDest() {
 }
 
 function getFileDownloadUrl(dest) {
-  const uri = url.pathToFileURL(dest).href.slice(PUBLIC_DIR.length - dest.length);
-  return encodeURI(`/download${uri}`);
+  const [ filename, dir ] = dest.split(path.sep).reverse();
+  return encodeURI(`/download/${dir}/${filename}`);
 }
 
 module.exports = {
   MAX_FILE_SIZE,
   PUBLIC_DIR,
   UPLOAD_DIR,
-  shakeStorage,
   upload,
   download,
   publish,

@@ -1,10 +1,9 @@
 const argv = require('minimist')(process.argv.slice(2));
 const debug = require('debug')('simple-file-hosting-service');
 const express = require('express');
-const StaticServer = require('node-static').Server;
 const fileUtils = require('./file-utils');
 
-const PORT = argv.port || 8080;
+const PORT = argv.port || 80;
 
 const PAGE = `
 <form action="/upload" enctype="multipart/form-data" method="post">
@@ -16,8 +15,6 @@ const PAGE = `
   <input type="submit" value="Upload">
 </form>
 `;
-
-const fileServer = new StaticServer(fileUtils.PUBLIC_DIR);
 
 const app = express();
 
@@ -31,16 +28,14 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/download/*', (req, res) => {
-  fileServer
-    .serveFile(req.params[0], 200, {}, req, res)
-    .on('error', (err) => res.sendStatus(404));
-});
+app.use('/download', express.static(fileUtils.PUBLIC_DIR, {fallthrough: false}));
 
 app.post('/upload', async (req, res, next) => {
   try {
-    await fileUtils.shakeStorage();
     const file = await fileUtils.upload(req, res);
+    if (!file) {
+      return res.sendStatus(400);
+    }
     debug('File uploaded:\n\t%o\n\t%o', file.path, file.originalname);
     const uri = await fileUtils.publish(file.path, file.originalname);
     res.redirect(uri);
@@ -51,7 +46,9 @@ app.post('/upload', async (req, res, next) => {
 
 app.post('/url-upload', async (req, res, next) => {
   try {
-    await fileUtils.shakeStorage();
+    if (!req.body.url) {
+      return res.sendStatus(400);
+    }
     const file = await fileUtils.download(req.body.url);
     debug('File uploaded by url:\n\t%o\n\t%o', file.dest, file.name);
     const uri = await fileUtils.publish(file.dest, file.name);
@@ -67,7 +64,7 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   debug('Error: %O', err);
-  res.sendStatus(500);
+  res.sendStatus(err.statusCode || 500);
 });
 
 app.listen(PORT, () => {
@@ -76,4 +73,5 @@ app.listen(PORT, () => {
 
 process.on('uncaughtException', (err) => {
   debug('Uncaught Exception: %O', err);
+  process.exit(1);
 });
